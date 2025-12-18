@@ -5,15 +5,15 @@ import pandas as pd
 from datetime import datetime
 from faker import Faker
 from supabase import create_client
-from dotenv import load_dotenv
 
 # =============================
-# 1. Load environment variables
+# 1. Hardcoded Supabase credentials & config
 # =============================
-load_dotenv()
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-RAW_SCHEMA= os.getenv("RAW_SCHEMA_NAME")
+SUPABASE_URL = "https://qlpxsymlkhqmhxpqctkj.supabase.co/"
+SUPABASE_KEY = "sb_secret_18VaeYpat3EreLOtoMc83w_vpvwKjUr"
+BUCKET_NAME = "motor_raw"
+RAW_SCHEMA = "Raw"
+CLEAN_SCHEMA = "Clean"
 
 # Connect to Supabase
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -73,14 +73,20 @@ def push_df_to_raw_schema(df: pd.DataFrame, table_base_name: str):
     create_sql = f"CREATE TABLE IF NOT EXISTS {RAW_SCHEMA}.{table_name} ({columns});"
 
     # Execute CREATE TABLE
-    supabase.postgrest.rpc("execute_sql", {"sql": create_sql}).execute()
+    try:
+        supabase.postgrest.rpc("execute_sql", {"sql": create_sql}).execute()
+    except Exception as e:
+        print("Error creating table:", e)
 
     # Insert rows
-    records = df.astype(str).to_dict(orient="records")  # convert all to str for safety
+    records = df.astype(str).to_dict(orient="records")  # convert all to str
     for row in records:
-        supabase.table(f"raw.{table_name}").insert(row).execute()
+        try:
+            supabase.table(f"{RAW_SCHEMA}.{table_name}").insert(row).execute()
+        except Exception as e:
+            print("Error inserting row:", e)
 
-    print(f"✅ Uploaded DataFrame to raw.{table_name}")
+    print(f"✅ Uploaded DataFrame to {RAW_SCHEMA}.{table_name}")
 
 # =============================
 # 4. Execution: Generate & Upload 3 datasets
