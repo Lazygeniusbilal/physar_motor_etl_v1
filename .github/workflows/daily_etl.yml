@@ -2,9 +2,9 @@ name: Daily Motor ETL Automation
 
 on:
   schedule:
-    # This is 4:00 AM UTC (London is currently same as UTC or +1)
-    - cron: '0 4 * * *'
-  workflow_dispatch: # This allows you to run it manually right now
+    # 18:10 UTC (6:10 PM UK/GMT)
+    - cron: '10 18 * * *'
+  workflow_dispatch: 
 
 jobs:
   run-etl-job:
@@ -25,6 +25,5 @@ jobs:
 
       - name: Run ETL Script
         env:
-          # This pulls the secret you saved in GitHub Settings
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python physar_motor_etl_v1.py
