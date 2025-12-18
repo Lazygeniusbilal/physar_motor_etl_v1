@@ -1,24 +1,30 @@
+import os
 import io
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from faker import Faker
 from supabase import create_client
+from dotenv import load_dotenv
 
-# =========================================================
-# 1. SUPABASE CONFIGURATION
-# =========================================================
-SUPABASE_URL = "https://qlpxsymlkhqmhxpqctkj.supabase.co/"
-SUPABASE_KEY = "sb_secret_18VaeYpat3EreLOtoMc83w_vpvwKjUr" 
-BUCKET_NAME = "motor_raw"
+# =============================
+# 1. Load environment variables
+# =============================
+load_dotenv()
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+RAW_SCHEMA= os.getenv("RAW_SCHEMA_NAME")
 
+# Connect to Supabase
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Faker for generating fake data
 fake = Faker("en_GB")
 np.random.seed(42)
 
-# =========================================================
-# 2. DATA GENERATION ENGINE
-# =========================================================
+# =============================
+# 2. Data Generation Engine
+# =============================
 VEH_MAKES = ["Ford", "Vauxhall", "BMW", "Audi", "Mercedes", "Toyota", "Honda"]
 VEH_BODY_TYPES = ["Hatchback", "Saloon", "Estate", "SUV", "Coupe"]
 FUEL_TYPES = ["Petrol", "Diesel", "Hybrid", "Electric"]
@@ -55,46 +61,45 @@ def make_base_frame(n_rows: int) -> pd.DataFrame:
         "payment_method": np.random.choice(PAYMENT_METHODS, size=n_rows),
     })
 
-# =========================================================
-# 3. STORAGE UPLOAD LOGIC
-# =========================================================
-def upload_df_as_csv_to_storage(df: pd.DataFrame, base_filename: str):
-    # 1. Generate Date Suffix (e.g., _20231027)
+# =============================
+# 3. Function to push DataFrame to raw schema
+# =============================
+def push_df_to_raw_schema(df: pd.DataFrame, table_base_name: str):
     date_suffix = datetime.now().strftime("%Y%m%d")
-    object_path = f"{base_filename}_{date_suffix}.csv"
+    table_name = f"{table_base_name}_{date_suffix}"
 
-    buf = io.StringIO()
-    df.to_csv(buf, index=False)
-    csv_bytes = buf.getvalue().encode("utf-8")
+    # Generate CREATE TABLE SQL dynamically
+    columns = ", ".join([f"{c} text" for c in df.columns])
+    create_sql = f"CREATE TABLE IF NOT EXISTS {RAW_SCHEMA}.{table_name} ({columns});"
 
-    try:
-        res = supabase.storage.from_(BUCKET_NAME).upload(
-            path=object_path,
-            file=csv_bytes,
-            file_options={"cache-control": "3600", "upsert": "true"},
-        )
-        print(f"✅ Successfully uploaded: {object_path}")
-    except Exception as e:
-        print(f"❌ Failed to upload {object_path}: {e}")
+    # Execute CREATE TABLE
+    supabase.postgrest.rpc("execute_sql", {"sql": create_sql}).execute()
 
-# =========================================================
-# 4. EXECUTION (The ETL Phase)
-# =========================================================
-print(f"--- Starting Data Generation for Motor_ETL_Test ---")
+    # Insert rows
+    records = df.astype(str).to_dict(orient="records")  # convert all to str for safety
+    for row in records:
+        supabase.table(f"raw.{table_name}").insert(row).execute()
 
-# Source A
+    print(f"✅ Uploaded DataFrame to raw.{table_name}")
+
+# =============================
+# 4. Execution: Generate & Upload 3 datasets
+# =============================
+print("--- Starting Data Generation & Raw Schema Upload ---")
+
+# Dataset A
 dfA = make_base_frame(1000).rename(columns={"driver_age": "drv_age", "vehicle_make": "veh_make"})
 dfA["source_file"] = "A"
-upload_df_as_csv_to_storage(dfA, "motor_A") # Note: Extension added in function
+push_df_to_raw_schema(dfA, "table_1")
 
-# Source B
+# Dataset B
 dfB = make_base_frame(5000).rename(columns={"ncd_years": "ncd_yrs", "total_claims": "claims_cnt"})
 dfB["source_file"] = "B"
-upload_df_as_csv_to_storage(dfB, "motor_B")
+push_df_to_raw_schema(dfB, "table_2")
 
-# Source C
+# Dataset C
 dfC = make_base_frame(7000).rename(columns={"cover_type": "cov_type", "postcode": "post_code"})
 dfC["source_file"] = "C"
-upload_df_as_csv_to_storage(dfC, "motor_C")
+push_df_to_raw_schema(dfC, "table_3")
 
-print(f"--- Extraction Complete. Files are in '{BUCKET_NAME}' bucket ---")
+print("--- All datasets uploaded to raw schema ---")
